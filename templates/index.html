@@ -411,27 +411,6 @@
     }
 
     // Helpers para llamadas al servidor que también actualizan la UI local
-    function setLedRemote(habitacion, estado) {
-      // Actualiza UI localmente (rápido) y pide al servidor cambiar el pin
-      const el = document.getElementById(habitacion);
-      if (el) {
-        el.dataset.intensity = estado ? '100' : '0';
-        if (estado) {
-          el.classList.add('encendida');
-          el.style.fill = 'rgba(255, 255, 100, 0.6)';
-        } else {
-          el.classList.remove('encendida');
-          el.style.fill = 'transparent';
-        }
-      }
-
-      return fetch('/set_led', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ habitacion: habitacion, estado: Boolean(estado) })
-      }).catch(err => console.error('setLedRemote error:', err));
-    }
-
     function setIntensityRemote(habitacion, intensidad) {
       const el = document.getElementById(habitacion);
       if (el) {
