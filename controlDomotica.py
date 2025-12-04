@@ -1,7 +1,7 @@
 from flask import Flask, render_template, request, jsonify, send_from_directory
 import os
-#import Adafruit_BBIO.GPIO as GPIO
-#import Adafruit_BBIO.PWM as PWM
+import Adafruit_BBIO.GPIO as GPIO
+import Adafruit_BBIO.PWM as PWM
 
 app = Flask(__name__)
 
@@ -22,12 +22,12 @@ sensores = {
 }
 
 # ==== INICIALIZAR PINES ====
-#for pin in leds.values():
-#    GPIO.setup(pin, GPIO.OUT)
-#    GPIO.output(pin, GPIO.LOW)  # todos apagados inicialmente
+for pin in leds.values():
+    GPIO.setup(pin, GPIO.OUT)
+    GPIO.output(pin, GPIO.LOW)  # todos apagados inicialmente
 
-#for pin in sensores.values():
-#    GPIO.setup(pin, GPIO.IN)
+for pin in sensores.values():
+    GPIO.setup(pin, GPIO.IN)
     
 # ==== RUTAS FLASK ====
 @app.route('/sources/<path:filename>')
@@ -51,7 +51,7 @@ def set_led():
     if habitacion not in leds:
         return jsonify({"error": "Habitación no reconocida"}), 400
 
-    #GPIO.output(leds[habitacion], GPIO.HIGH if estado else GPIO.LOW)
+    GPIO.output(leds[habitacion], GPIO.HIGH if estado else GPIO.LOW)
     return jsonify({"ok": True, "habitacion": habitacion, "estado": estado})
 
 @app.route('/set_intensity', methods=['POST'])
@@ -67,20 +67,53 @@ def set_intensity():
     if habitacion not in leds:
         return jsonify({"error": "Habitación no reconocida"}), 400
 
-    # Por ahora, solo encendemos si intensidad > 0:
-    #PWM.start(leds[habitacion], intensidad)
-    return jsonify({"ok": True, "habitacion": habitacion, "intensidad": intensidad})
+    pin = leds[habitacion]
+    
+    # Lista de pines que soportan PWM en BeagleBone Black
+    pwm_pins = ["P9_14", "P9_16", "P9_21", "P9_22", "P8_13", "P8_19"]
+    
+    # Si intensidad es 0, apagar todo
+    if intensidad == 0:
+        try:
+            PWM.stop(pin)
+        except:
+            pass
+        GPIO.output(pin, GPIO.LOW)
+        return jsonify({"ok": True, "habitacion": habitacion, "intensidad": intensidad})
+    
+    # Intentar usar PWM si el pin lo soporta
+    if pin in pwm_pins:
+        try:
+            # Limpiar el pin primero - importante para evitar conflictos
+            try:
+                PWM.stop(pin)
+            except:
+                pass
+            
+            try:
+                GPIO.cleanup(pin)
+            except:
+                pass
+            
+            # Iniciar PWM limpiamente
+            PWM.start(pin, intensidad, 1000)
+            return jsonify({"ok": True, "habitacion": habitacion, "intensidad": intensidad})
+        except Exception as e:
+            print(f"Error PWM en {pin} ({habitacion}): {str(e)}. Usando fallback GPIO.")
+            # Si PWM falla, continuar con fallback GPIO
+    
+    # Fallback: usar GPIO simple on/off
+    GPIO.setup(pin, GPIO.OUT)
+    GPIO.output(pin, GPIO.HIGH)
+    return jsonify({"ok": True, "habitacion": habitacion, "intensidad": intensidad, "warning": f"PWM no disponible en {pin}, usando on/off"})
 
 @app.route('/leer_sensores')
 def leer_sensores():
     """
     Devuelve el estado de los sensores conectados.
     """
-    # Simulación de lectura analógica / digital (sustituir por GPIO.input / ADC real)
-    # En un escenario real podrías tener: valor_puerta = GPIO.input(sensores['puerta'])
-    # o lectura ADC para luz ambiente.
-    valor_puerta = 600  # Ejemplo: valor crudo del sensor de puerta
-    valor_luz = 300     # Ejemplo: valor crudo del sensor de luz
+    valor_puerta = GPIO.input(sensores['puerta'])
+    valor_luz = GPIO.input(sensores['luz'])
 
     # Umbrales (ajusta según calibración real). Podrías moverlos a variables de entorno.
     UMBRAL_PUERTA = 500  # < umbral => puerta abierta
@@ -106,16 +139,21 @@ def leer_sensores():
 def set_all():
     data = request.get_json()
     intensidad = int(data.get('intensidad', 0))
-    #for pin in leds.values():
-    #    GPIO.output(pin, GPIO.HIGH if intensidad > 0 else GPIO.LOW)
+    for pin in leds.values():
+        GPIO.output(pin, GPIO.HIGH if intensidad > 0 else GPIO.LOW)
     return jsonify({"ok": True, "intensidad": intensidad})
 
 
 # ==== APAGAR TODOS LOS LEDS AL SALIR ====
 @app.teardown_appcontext
 def cleanup(exception=None):
-    pass
-    #GPIO.cleanup()
+    # Limpiar PWM
+    for pin in leds.values():
+        try:
+            PWM.stop(pin)
+        except:
+            pass
+    GPIO.cleanup()
 
 # ==== EJECUTAR SERVIDOR ====
 if __name__ == '__main__':
